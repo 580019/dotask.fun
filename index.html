@@ -1214,19 +1214,43 @@ exportBtn.addEventListener("click", async () => {
       exportedAt: new Date().toISOString()
     };
 
-    const json = JSON.stringify(backup, null, 2);
+    const jsonData = JSON.stringify(backup, null, 2);
 
-    // Prompt user for filename
-    const defaultName = 'dotask-backup-' + new Date().toISOString().slice(0, 10) + '.json';
-    const filename = prompt('Enter filename for backup (include .json):', defaultName);
-    if (!filename || !filename.trim()) {
+    // Prompt user for custom filename
+    let userFileName = prompt("Enter filename for backup (without .json extension):", "dotask-backup-" + new Date().toISOString().slice(0, 10));
+    
+    if (userFileName === null) {
       alert('Export cancelled.');
       return;
     }
+    
+    // Clean filename and add .json extension
+    userFileName = userFileName.trim().replace(/\s+/g, "-").replace(/[^a-zA-Z0-9-_]/g, "").replace(/\.json$/i, "");
+    if (!userFileName) {
+      alert("Invalid filename. Using default name.");
+      userFileName = "dotask-backup-" + new Date().toISOString().slice(0, 10);
+    }
+    
+    const fileName = userFileName + ".json";
 
-    const file = new File([json], filename.trim(), { type: 'application/json' });
+    // Check if Cordova is available (mobile app)
+    if (window.cordova) {
+      exportDataCordovaDoTask(jsonData, fileName);
+    } else {
+      // Web browser - try native methods
+      exportDataWebDoTask(jsonData, fileName);
+    }
 
-    // 1) Try the Web Share API to let the user choose where to save and confirm the name.
+  } catch (err) {
+    alert("Export failed: " + err.message);
+  }
+});
+
+async function exportDataWebDoTask(jsonData, fileName) {
+  try {
+    const file = new File([jsonData], fileName, { type: 'application/json' });
+
+    // Try the Web Share API first
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try {
         await navigator.share({
@@ -1234,60 +1258,66 @@ exportBtn.addEventListener("click", async () => {
           text: 'Backup file exported from DoTask',
           files: [file]
         });
-        alert('Backup shared. If you chose "Save to Files", it should be saved with your chosen name and location.');
+        alert('✓ Backup shared successfully!');
         return;
       } catch (shareErr) {
-        // Share cancelled or failed; fall back below
+        // Share cancelled or failed; fall back to blob download
       }
     }
 
-    // 2) Fallback: If running in Cordova, save to app's external storage with the chosen name.
-    if (window.cordova && window.resolveLocalFileSystemURL && window.cordova.file) {
-      const dir = cordova.file.externalDataDirectory || cordova.file.dataDirectory || cordova.file.documentsDirectory;
-      if (dir) {
-        window.resolveLocalFileSystemURL(dir, dirEntry => {
-          dirEntry.getFile(filename.trim(), { create: true, exclusive: false }, fileEntry => {
-            fileEntry.createWriter(writer => {
-              writer.onwriteend = () => {
-                alert('Backup saved to app storage: ' + fileEntry.nativeURL + '\n\nYou can access it via file manager or share from there.');
-              };
-              writer.onerror = err => {
-                alert('Failed to save backup file: ' + err);
-              };
-              const blob = new Blob([json], { type: 'application/json' });
-              writer.write(blob);
-            }, err => {
-              alert('File writer error: ' + err);
-            });
-          }, err => {
-            alert('Could not create backup file: ' + err);
-          });
-        }, err => {
-          alert('Filesystem access error: ' + err);
-        });
-        return;
-      }
-    }
-
-    // 3) Last fallback: Copy to clipboard
-    let clipboardMessage = '';
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      try {
-        await navigator.clipboard.writeText(json);
-        clipboardMessage = ' The backup JSON was copied to clipboard. Paste it into a file named "' + filename.trim() + '" and save.';
-      } catch (err) {
-        clipboardMessage = ' Could not copy to clipboard. Here is the backup data:\n\n' + json;
-      }
-    } else {
-      clipboardMessage = ' Clipboard not supported. Here is the backup data:\n\n' + json;
-    }
-
-    alert('Could not save file automatically.' + clipboardMessage);
-
+    // Fallback: Download using blob
+    const blob = new Blob([jsonData], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    URL.revokeObjectURL(url);
+    anchor.remove();
+    alert('✓ Backup downloaded successfully!\n\nFile: ' + fileName);
   } catch (err) {
-    alert("Export failed: " + err.message);
+    alert('Export error: ' + err.message);
   }
-});
+}
+
+function exportDataCordovaDoTask(jsonData, fileName) {
+  window.resolveLocalFileSystemURL(cordova.file.externalDataDirectory, (dirEntry) => {
+    dirEntry.getFile(fileName, { create: true }, (fileEntry) => {
+      fileEntry.createWriter((fileWriter) => {
+        fileWriter.onwriteend = () => {
+          alert("✓ Backup saved successfully!\n\nFile: " + fileName + "\nLocation: Documents folder\n\nYou can find it in your file manager.");
+          console.log("Backup saved at: " + fileEntry.fullPath);
+        };
+        fileWriter.onerror = (e) => {
+          alert("Error saving backup: " + e.name);
+        };
+        fileWriter.write(jsonData);
+      });
+    }, (error) => {
+      alert("Error creating file: " + error.code);
+    });
+  }, (error) => {
+    // Fallback to documents directory if external data directory not available
+    window.resolveLocalFileSystemURL(cordova.file.documentsDirectory, (dirEntry) => {
+      dirEntry.getFile(fileName, { create: true }, (fileEntry) => {
+        fileEntry.createWriter((fileWriter) => {
+          fileWriter.onwriteend = () => {
+            alert("✓ Backup saved successfully!\n\nFile: " + fileName + "\nLocation: App Documents folder");
+          };
+          fileWriter.onerror = (e) => {
+            alert("Error saving backup: " + e.name);
+          };
+          fileWriter.write(jsonData);
+        });
+      }, (error) => {
+        alert("Error creating file: " + error.code);
+      });
+    }, (error) => {
+      alert("Could not access file system: " + error.code);
+    });
+  });
+}
 
 /* IMPORT JSON BACKUP */
 
