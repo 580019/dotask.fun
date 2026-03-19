@@ -1206,79 +1206,51 @@ const importBtn = document.getElementById("import-backup-btn");
 const importFile = document.getElementById("import-backup-file");
 
 /* EXPORT JSON BACKUP */
-exportBtn.addEventListener("click", async () => {
-  try {
-    const backup = {
-      tasks: typeof tasks !== 'undefined' ? tasks : [],
-      goals: typeof goals !== 'undefined' ? goals : [],
-      exportedAt: new Date().toISOString()
-    };
-
-    const jsonData = JSON.stringify(backup, null, 2);
-
-    // Prompt user for custom filename
-    let userFileName = prompt("Enter filename for backup (without .json extension):", "dotask-backup-" + new Date().toISOString().slice(0, 10));
-    
-    if (userFileName === null) {
-      alert('Export cancelled.');
-      return;
-    }
-    
-    // Clean filename and add .json extension
-    userFileName = userFileName.trim().replace(/\s+/g, "-").replace(/[^a-zA-Z0-9-_]/g, "").replace(/\.json$/i, "");
-    if (!userFileName) {
-      alert("Invalid filename. Using default name.");
-      userFileName = "dotask-backup-" + new Date().toISOString().slice(0, 10);
-    }
-    
-    const fileName = userFileName + ".json";
-
-    // Check if Cordova is available (mobile app)
-    if (window.cordova) {
-      exportDataCordovaDoTask(jsonData, fileName);
-    } else {
-      // Web browser - try native methods
-      exportDataWebDoTask(jsonData, fileName);
-    }
-
-  } catch (err) {
-    alert("Export failed: " + err.message);
+function exportDataForDoTask() {
+  const backup = {
+    tasks: typeof tasks !== 'undefined' ? tasks : [],
+    goals: typeof goals !== 'undefined' ? goals : [],
+    exportedAt: new Date().toISOString()
+  };
+  
+  const jsonData = JSON.stringify(backup, null, 2);
+  
+  // Prompt user for custom filename
+  let userFileName = prompt("Enter filename for export (without .json extension):", "dotask-backup-" + new Date().toISOString().slice(0, 10));
+  
+  if (userFileName === null) {
+    // User cancelled
+    return;
   }
-});
-
-async function exportDataWebDoTask(jsonData, fileName) {
-  try {
-    const file = new File([jsonData], fileName, { type: 'application/json' });
-
-    // Try the Web Share API first
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try {
-        await navigator.share({
-          title: 'DoTask Backup',
-          text: 'Backup file exported from DoTask',
-          files: [file]
-        });
-        alert('✓ Backup shared successfully!');
-        return;
-      } catch (shareErr) {
-        // Share cancelled or failed; fall back to blob download
-      }
-    }
-
-    // Fallback: Download using blob
-    const blob = new Blob([jsonData], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = fileName;
-    document.body.appendChild(anchor);
-    anchor.click();
-    URL.revokeObjectURL(url);
-    anchor.remove();
-    alert('✓ Backup downloaded successfully!\n\nFile: ' + fileName);
-  } catch (err) {
-    alert('Export error: ' + err.message);
+  
+  // Clean filename and add .json extension
+  userFileName = userFileName.trim().replace(/\s+/g, "-").replace(/[^a-zA-Z0-9-_]/g, "");
+  if (!userFileName) {
+    alert("Invalid filename. Using default name.");
+    userFileName = "dotask-backup-" + new Date().toISOString().slice(0, 10);
   }
+  
+  const fileName = userFileName + ".json";
+
+  // Check if Cordova is available (mobile app)
+  if (window.cordova) {
+    exportDataCordovaDoTask(jsonData, fileName);
+  } else {
+    // Web browser fallback
+    exportDataWebDoTask(jsonData, fileName);
+  }
+}
+
+function exportDataWebDoTask(jsonData, fileName) {
+  const blob = new Blob([jsonData], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  URL.revokeObjectURL(url);
+  anchor.remove();
 }
 
 function exportDataCordovaDoTask(jsonData, fileName) {
@@ -1286,11 +1258,11 @@ function exportDataCordovaDoTask(jsonData, fileName) {
     dirEntry.getFile(fileName, { create: true }, (fileEntry) => {
       fileEntry.createWriter((fileWriter) => {
         fileWriter.onwriteend = () => {
-          alert("✓ Backup saved successfully!\n\nFile: " + fileName + "\nLocation: Documents folder\n\nYou can find it in your file manager.");
-          console.log("Backup saved at: " + fileEntry.fullPath);
+          alert("✓ Backup exported successfully!\n\nFile: " + fileName + "\nLocation: Android/data/com.gainly.track/files/\n\nYou can find it in your file manager.");
+          console.log("File saved at: " + fileEntry.fullPath);
         };
         fileWriter.onerror = (e) => {
-          alert("Error saving backup: " + e.name);
+          alert("Error exporting data: " + e.name);
         };
         fileWriter.write(jsonData);
       });
@@ -1303,10 +1275,10 @@ function exportDataCordovaDoTask(jsonData, fileName) {
       dirEntry.getFile(fileName, { create: true }, (fileEntry) => {
         fileEntry.createWriter((fileWriter) => {
           fileWriter.onwriteend = () => {
-            alert("✓ Backup saved successfully!\n\nFile: " + fileName + "\nLocation: App Documents folder");
+            alert("✓ Backup exported successfully!\n\nFile: " + fileName + "\nLocation: App Documents folder\n\nYou can find it in your file manager.");
           };
           fileWriter.onerror = (e) => {
-            alert("Error saving backup: " + e.name);
+            alert("Error exporting data: " + e.name);
           };
           fileWriter.write(jsonData);
         });
@@ -1318,6 +1290,8 @@ function exportDataCordovaDoTask(jsonData, fileName) {
     });
   });
 }
+
+exportBtn.addEventListener("click", exportDataForDoTask);
 
 /* IMPORT JSON BACKUP */
 
