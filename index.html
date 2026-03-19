@@ -488,6 +488,95 @@ textarea {
   letter-spacing: 0.5px;
 }
 
+/* -----------------------------
+   MOBILE RESPONSIVE FIX
+----------------------------- */
+
+html, body {
+  overflow-x: hidden;
+}
+
+#app {
+  max-width: 1100px;
+  margin: auto;
+  padding: 0 16px;
+}
+
+/* Prevent horizontal overflow */
+
+* {
+  max-width: 100%;
+}
+
+/* Form layout */
+
+@media (max-width: 900px) {
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-grid input,
+  .form-grid select,
+  .form-grid button {
+    width: 100%;
+  }
+
+}
+
+/* Header stacking */
+
+@media (max-width: 700px) {
+
+  .header {
+    flex-direction: column;
+    gap: 14px;
+    align-items: flex-start;
+  }
+
+  .tabs {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+}
+
+/* Task / goal layout */
+
+@media (max-width: 600px) {
+
+  .task-item,
+  .goal-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .actions {
+    margin-top: 8px;
+  }
+
+}
+
+/* Notes layout */
+
+@media (max-width: 600px) {
+
+  .notes {
+    grid-template-columns: 1fr;
+  }
+
+}
+select,
+input,
+textarea,
+button {
+  width: 100%;
+}
+
+body {
+  overflow-x: hidden;
+}
+
     </style>
 </head>
 <body>
@@ -498,6 +587,11 @@ textarea {
         <button class="tab active" data-target="#view-tasks">Tasks</button>
         <button class="tab" data-target="#view-goals">Goals</button>
       </nav>
+      <div style="display:flex; gap:8px; margin-left:10px;">
+  <button class="btn" id="export-backup">Export Backup</button>
+  <button class="btn" id="import-backup-btn">Import Backup</button>
+  <input type="file" id="import-backup-file" accept=".json" style="display:none">
+</div>
     </header>
 
     <main class="content">
@@ -1102,6 +1196,145 @@ handleGoalsContainer(yearGoals);
 
 renderTasks();
 renderGoals();
+
+/* ===============================
+   BACKUP EXPORT / IMPORT SYSTEM
+================================= */
+
+const exportBtn = document.getElementById("export-backup");
+const importBtn = document.getElementById("import-backup-btn");
+const importFile = document.getElementById("import-backup-file");
+
+/* EXPORT JSON BACKUP */
+exportBtn.addEventListener("click", async () => {
+  try {
+    const backup = {
+      tasks: typeof tasks !== 'undefined' ? tasks : [],
+      goals: typeof goals !== 'undefined' ? goals : [],
+      exportedAt: new Date().toISOString()
+    };
+
+    const json = JSON.stringify(backup, null, 2);
+
+    // Prompt user for filename
+    const defaultName = 'dotask-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+    const filename = prompt('Enter filename for backup (include .json):', defaultName);
+    if (!filename || !filename.trim()) {
+      alert('Export cancelled.');
+      return;
+    }
+
+    const file = new File([json], filename.trim(), { type: 'application/json' });
+
+    // 1) Try the Web Share API to let the user choose where to save and confirm the name.
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({
+          title: 'DoTask Backup',
+          text: 'Backup file exported from DoTask',
+          files: [file]
+        });
+        alert('Backup shared. If you chose "Save to Files", it should be saved with your chosen name and location.');
+        return;
+      } catch (shareErr) {
+        // Share cancelled or failed; fall back below
+      }
+    }
+
+    // 2) Fallback: If running in Cordova, save to app's external storage with the chosen name.
+    if (window.cordova && window.resolveLocalFileSystemURL && window.cordova.file) {
+      const dir = cordova.file.externalDataDirectory || cordova.file.dataDirectory || cordova.file.documentsDirectory;
+      if (dir) {
+        window.resolveLocalFileSystemURL(dir, dirEntry => {
+          dirEntry.getFile(filename.trim(), { create: true, exclusive: false }, fileEntry => {
+            fileEntry.createWriter(writer => {
+              writer.onwriteend = () => {
+                alert('Backup saved to app storage: ' + fileEntry.nativeURL + '\n\nYou can access it via file manager or share from there.');
+              };
+              writer.onerror = err => {
+                alert('Failed to save backup file: ' + err);
+              };
+              const blob = new Blob([json], { type: 'application/json' });
+              writer.write(blob);
+            }, err => {
+              alert('File writer error: ' + err);
+            });
+          }, err => {
+            alert('Could not create backup file: ' + err);
+          });
+        }, err => {
+          alert('Filesystem access error: ' + err);
+        });
+        return;
+      }
+    }
+
+    // 3) Last fallback: Copy to clipboard
+    let clipboardMessage = '';
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(json);
+        clipboardMessage = ' The backup JSON was copied to clipboard. Paste it into a file named "' + filename.trim() + '" and save.';
+      } catch (err) {
+        clipboardMessage = ' Could not copy to clipboard. Here is the backup data:\n\n' + json;
+      }
+    } else {
+      clipboardMessage = ' Clipboard not supported. Here is the backup data:\n\n' + json;
+    }
+
+    alert('Could not save file automatically.' + clipboardMessage);
+
+  } catch (err) {
+    alert("Export failed: " + err.message);
+  }
+});
+
+/* IMPORT JSON BACKUP */
+
+importBtn.addEventListener("click", () => {
+  importFile.click();
+});
+
+importFile.addEventListener("change", (e) => {
+
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+
+  reader.onload = function(event) {
+
+    try {
+
+      const data = JSON.parse(event.target.result);
+
+      if (!data.tasks || !data.goals) {
+        alert("Invalid backup file.");
+        return;
+      }
+
+      tasks = data.tasks;
+      goals = data.goals;
+
+      write(STORAGE.tasks, tasks);
+      write(STORAGE.goals, goals);
+
+      renderTasks();
+      renderGoals();
+
+      alert("Backup imported successfully.");
+
+    } catch (err) {
+
+      alert("Failed to import backup.");
+
+    }
+
+  };
+
+  reader.readAsText(file);
+
+});
 
 </script>
 </body>
